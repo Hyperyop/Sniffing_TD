@@ -24,23 +24,69 @@ int tcp=0,udp=0,icmp=0,others=0,igmp=0,total=0,i,j;
 
 
 int main(int argc, char *argv[])
-{
+{	
+	pcap_if_t *all_dev, *dev;
 	 pcap_t *handle;		/* Session handle */
-	 char dev[] = "eth0";		/* Device to sniff on */
-	 char errbuf[PCAP_ERRBUF_SIZE];	/* Error string */
+	 		/* Device to sniff on */
+	 char errbuf[PCAP_ERRBUF_SIZE],dev_list[30][2];	/* Error string */
 	 struct bpf_program fp;		/* The compiled filter expression */
 	 char filter_exp[] = "port 53";	/* The filter expression */
 	 bpf_u_int32 mask;		/* The netmask of our sniffing device */
 	 bpf_u_int32 net;		/* The IP of our sniffing device */
- 
-	 if (pcap_lookupnet(dev, &net, &mask, errbuf) == -1) {
-		 fprintf(stderr, "Can't get netmask for device %s\n", dev);
-		 net = 0;
-		 mask = 0;
-	 }
-	 handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+	//get all available devices
+	if(pcap_findalldevs(&all_dev, errbuf))
+	{
+		fprintf(stderr, "Unable to find devices: %s", errbuf);
+		exit(1);
+	}
+
+	if(all_dev == NULL)
+	{
+		fprintf(stderr, "No device found. Please check that you are running with root \n");
+		exit(1);
+	}
+
+	printf("Available devices list: \n");
+	int c = 1;
+
+	for(dev = all_dev; dev != NULL; dev = dev->next)
+	{
+		printf("#%d %s : %s \n", c, dev->name, dev->description);
+		if(dev->name != NULL)
+		{
+			strncpy(dev_list[c], dev->name, strlen(dev->name));
+		}
+		c++;
+	}
+
+
+
+	printf("Please choose the monitoring device (e.g., en0):\n");
+	char *dev_name = malloc(20);
+	fgets(dev_name, 20, stdin);
+	*(dev_name + strlen(dev_name) - 1) = '\0'; //the pcap_open_live don't take the last \n in the end
+
+	//look up the chosen device
+	int ret = pcap_lookupnet(dev_name, &net, &mask, errbuf);
+	if(ret < 0)
+	{
+		fprintf(stderr, "Error looking up net: %s \n", dev_name);
+		exit(1);
+	}
+
+	struct sockaddr_in addr;
+	addr.sin_addr.s_addr = net;
+	char ip_char[100];
+	inet_ntop(AF_INET, &(addr.sin_addr), ip_char, 100);
+	printf("NET address: %s\n", ip_char);
+
+	addr.sin_addr.s_addr = mask;
+	memset(ip_char, 0, 100);
+	inet_ntop(AF_INET, &(addr.sin_addr), ip_char, 100);
+	printf("Mask: %s\n", ip_char);
+	handle = pcap_open_live(dev_name, BUFSIZ, 1, 1000, errbuf);
 	 if (handle == NULL) {
-		 fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
+		 fprintf(stderr, "Couldn't open device %s: %s\n", dev_name, errbuf);
 		 return(2);
 	 }
 	 if (pcap_compile(handle, &fp, filter_exp, 0, net) == -1) {
@@ -86,7 +132,6 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
 	//Get the IP Header part of this packet , excluding the ethernet header
 	struct iphdr *iph = (struct iphdr*)(buffer + sizeof(struct ethhdr));
 	++total;
-	printf("%d\n",iph->protocol);
 	if(iph->protocol==17) //Check the Protocol and do accordingly...
 	{
 		print_udp_packet(buffer , size);
